@@ -15,6 +15,14 @@
     fallbacks: window.R18 ? R18.stats.fallbacks : -1
   });
   QA.errSnap = errSnap;
+  // resource counters for long-session growth checks
+  QA.mem = function () {
+    const pm = performance.memory || {};
+    return {heapMB: pm.usedJSHeapSize ? +(pm.usedJSHeapSize / 1048576).toFixed(1) : null,
+      cache: R18.cache.size, cachePx: R18.cacheStat ? R18.cacheStat.px : null, statics: R18.statics ? Object.keys(R18.statics).length : null,
+      models: R18.models.size, meshes: R18.GL.meshes ? R18.GL.meshes.size : null, domNodes: document.getElementsByTagName('*').length,
+      dying: G && G.dying ? G.dying.length : 0, fx: G && G.fx ? G.fx.length : 0, units: G && G.units ? G.units.length : 0};
+  };
   // count endBattle calls per battle (rewards must be granted exactly once)
   if (typeof endBattle === 'function' && !endBattle.__qa) {
     const base = endBattle;
@@ -24,7 +32,7 @@
   const pct = (a, p) => a.length ? +a[Math.min(a.length - 1, Math.floor(a.length * p))].toFixed(1) : 0;
   const prof = () => ({tr: profile.trophies, gold: profile.gold, battles: profile.battles, wins: profile.wins, gems: profile.gems});
 
-  /* start: 'normal' | 'chaos' | any R4.MODES / R4.MODES_X id
+  /* start: 'current' (battle already on screen) | 'normal' | 'chaos' | any R4.MODES / R4.MODES_X id
      opts: {deck, maxSec, dt, renderEvery, autopilot:true, force:'p'|'e'|null (kill towers at forceAt), forceAt} */
   QA.match = function (start, opts) {
     opts = Object.assign({maxSec: 420, dt: 1 / 30, renderEvery: 8, autopilot: true, force: null, forceAt: 20}, opts || {});
@@ -35,11 +43,12 @@
       if (opts.deck) profile.deck = opts.deck.slice();
       QA.endCalls = 0;
       const p0 = prof();
-      if (start === 'normal') { STATE.screen = 'battle'; newBattle(false); }
+      if (start === 'current') { /* keep the battle the UI already started (e.g. Draft) */ }
+      else if (start === 'normal') { STATE.screen = 'battle'; newBattle(false); }
       else if (start === 'chaos') { STATE.screen = 'battle'; newBattle(true); }
       else R4.startMode(start);
       if (!G || STATE.screen !== 'battle') { Object.assign(R, {done: true, crash: 'mode did not start', screen: STATE.screen, modal: STATE.modal && STATE.modal.type}); return 'nostart'; }
-      let sim = 0, n = 0, dep = 0, maxU = 0, ot = false, ft = [], picks = 0, last = null;
+      let sim = 0, n = 0, dep = 0, maxU = 0, ot = false, ft = [], fu = [], picks = 0;
       const phases = new Set();
       const chunk = () => {
         try {
@@ -66,17 +75,19 @@
             update(opts.dt); sim += opts.dt; n++;
             if (G.slowmo) G.slowmo = 0;
             phases.add(G.phase); if (G.phase === 'overtime') ot = true;
-            if (n % opts.renderEvery === 0) { const a = performance.now(); render(); ft.push(performance.now() - a); }
+            if (n % opts.renderEvery === 0) { const a = performance.now(); render(); ft.push(performance.now() - a); fu.push(G.units.length); }
             maxU = Math.max(maxU, G.units.length);
           }
           if (G.phase === 'ended' || sim >= opts.maxSec) {
             // let the end screen settle and render a few frames
             for (let k = 0; k < 90; k++) { update(1 / 30); if (k % 10 === 0) render(); }
+            const perU = ft.map((t, i) => t / Math.max(1, fu[i])).sort((a, b) => a - b);
+            const meanU = fu.reduce((a, b) => a + b, 0) / Math.max(1, fu.length);
             ft.sort((a, b) => a - b);
             Object.assign(R, {done: true, phase: G.phase, winner: G.winner, reason: G.endReason, sim: Math.round(sim), dep, maxU, picks,
               crowns: [G.you && G.you.crowns, G.ai && G.ai.crowns], overtime: ot, phases: [...phases],
               endCalls: QA.endCalls, prof0: p0, prof1: prof(), screen: STATE.screen, modal: STATE.modal && STATE.modal.type,
-              renderMed: pct(ft, 0.5), renderP95: pct(ft, 0.95), renderMax: pct(ft, 1), frames: ft.length,
+              renderMed: pct(ft, 0.5), msPerUnitMed: +(perU[perU.length >> 1] || 0).toFixed(2), meanUnits: +meanU.toFixed(1), mem: QA.mem(), renderP95: pct(ft, 0.95), renderMax: pct(ft, 1), frames: ft.length,
               wall: Math.round(performance.now() - t0), cache: R18.cache.size, stats: Object.assign({}, R18.stats), errs: errSnap()});
             return;
           }

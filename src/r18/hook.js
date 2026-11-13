@@ -320,4 +320,4 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
   }, 1500);
 }
 R18.modelFor = modelFor; R18.renderFrame = renderFrame; R18.portrait = portrait; R18.staticSprite = staticSprite;
-R18.FRAME = FRAME; R18.BUDGET = BUDGET; R18.cache = CACHE; R18.cacheStat = CACHE_STAT; R18.GL = GL;
+R18.FRAME = FRAME; R18.BUDGET = BUDGET; R18.cache = CACHE; R18.cacheStat = CACHE_STAT; R18.statics = STATIC; R18.GL = GL;
