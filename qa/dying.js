@@ -3,7 +3,7 @@
 window.__dy=function(){
   const out={ok:0,bad:[]};
   STATE.modal=null; STATE.screen='battle'; newBattle(false); G.introT=0;
-  for(const k of ['knight','musketeer','valkyrie','wizard','giant','bowler','archers','barbarians']){
+  for(const k of ['knight','musketeer','valkyrie','wizard','giant','bowler','archers','barbarians','skarmy','skeletons','skeleton']){
     for(const side of ['p','e']) for(const v of ['','evo','hero']){
       if(v && !R18.modelFor(k,v)) continue;
       const n0=G.units.length; spawnUnit(k,side,9,side==='p'?22:10,1);

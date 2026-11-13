@@ -22,6 +22,12 @@ CASES=(
   "null_with_good_bak|localStorage.setItem('crCloneProfileV2','null'); localStorage.setItem('crCloneProfileV2_bak', JSON.stringify(Object.assign({},G0,{trophies:321})))|321"
   "cards_array|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{cards:[1,2],trophies:222})))|222"
   "deck_array_of_junk|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{deck:[[1],{},7,null],trophies:333})))|333"
+  "truncated_primary_good_bak|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{trophies:999})).slice(0,-40)); localStorage.setItem('crCloneProfileV2_bak', JSON.stringify(Object.assign({},G0,{trophies:555})))|555"
+  "empty_object_good_bak|localStorage.setItem('crCloneProfileV2','{}'); localStorage.setItem('crCloneProfileV2_bak', JSON.stringify(Object.assign({},G0,{trophies:444})))|444"
+  "both_corrupt|localStorage.setItem('crCloneProfileV2','{\"cards\":'); localStorage.setItem('crCloneProfileV2_bak','nul')|0"
+  "scalar_cards_deck|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{cards:1,deck:'x',trophies:111})))|111"
+  "card_entry_scalars|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{cards:Object.assign({},G0.cards,{knight:5,archers:'x',giant:true}),trophies:112})))|112"
+  "junk_numbers|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{trophies:'abc',gold:null,gems:-5})))|any"
   "valid_untouched|localStorage.setItem('crCloneProfileV2', JSON.stringify(Object.assign({},G0,{trophies:1234,gold:4321})))|1234"
 )
 for c in "${CASES[@]}"; do
@@ -32,10 +38,13 @@ for c in "${CASES[@]}"; do
   r=""
   for _ in 1 2 3 4 5 6; do
     sleep 3
-    r=$(ab eval 'typeof STATE==="undefined"||typeof profile==="undefined"||!profile?"":(function(){var o={scr:STATE.screen, deck:profile.deck&&profile.deck.length, tr:profile.trophies, gold:profile.gold}; try{STATE.modal=null; STATE.screen="battle"; newBattle(false); G.introT=0; for(let i=0;i<90;i++){update(1/30); if(i%45==0) render();} o.battle=G.phase;}catch(e){o.crash=String(e.stack).slice(0,300)} o.errs=[].concat((R3.errors||[]).slice(0,3),(R4.errors||[]).slice(0,3),R18.err?[R18.err]:[]); STATE.screen="home"; return JSON.stringify(o);})()')
+    r=$(ab eval 'typeof STATE==="undefined"||typeof profile==="undefined"||!profile?"":(function(){var o={scr:STATE.screen, deck:profile.deck&&profile.deck.length, tr:profile.trophies, gold:profile.gold}; try{STATE.modal=null; STATE.screen="battle"; newBattle(false); G.introT=0; for(let i=0;i<90;i++){update(1/30); if(i%45==0) render();} o.battle=G.phase;}catch(e){o.crash=String(e.stack).slice(0,300)} try{o.pt=JSON.parse(localStorage.getItem("crCloneProfileV2")).trophies;o.bt=JSON.parse(localStorage.getItem("crCloneProfileV2_bak")).trophies;}catch(e){o.stor="unparseable";} o.trNum=typeof profile.trophies==="number"&&isFinite(profile.trophies); o.goldNum=typeof profile.gold==="number"&&isFinite(profile.gold); o.errs=[].concat((R3.errors||[]).slice(0,3),(R4.errors||[]).slice(0,3),R18.err?[R18.err]:[]); STATE.screen="home"; return JSON.stringify(o);})()')
     [ -n "$r" ] && [ "$r" != '""' ] && break
   done
   ok=FAIL
-  echo "$r" | grep -q "tr\\\\\":$want," && echo "$r" | grep -q 'deck\\":8' && echo "$r" | grep -q 'battle\\":\\"playing' && echo "$r" | grep -q 'errs\\":\[\]' && ok=PASS
+  pat="tr\\\\\":$want,"; [ "$want" = any ] && pat='tr'
+  # what loaded must also be what is now stored, in both the primary and the backup slot
+  [ "$want" != any ] && pat="$pat.*pt\\\\\":$want,\\\\\"bt\\\\\":$want,"
+  echo "$r" | grep -q "$pat" && echo "$r" | grep -q 'trNum\\":true' && echo "$r" | grep -q 'goldNum\\":true' && echo "$r" | grep -q 'deck\\":8' && echo "$r" | grep -q 'battle\\":\\"playing' && echo "$r" | grep -q 'errs\\":\[\]' && ok=PASS
   echo "$ok $name want_tr=$want $r"
 done
