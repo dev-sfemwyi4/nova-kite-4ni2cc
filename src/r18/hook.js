@@ -274,13 +274,24 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
       if (window.R10) R10.on = s10;
     }
   };
-  if (typeof drawDying === 'function') {                // dying troops keep their team colours
+  // death records carry no variant: tag them in die() so evo / hero troops keep their own model while dying
+  if (typeof die === 'function') {
+    const baseDie = die;
+    die = function (o) {
+      const n = G && G.dying ? G.dying.length : 0;
+      const r = baseDie.apply(this, arguments);
+      if (o && (o.hero || o.evo) && G && G.dying)
+        for (let i = n; i < G.dying.length; i++) if (G.dying[i].key === o.key && G.dying[i].r18v == null) G.dying[i].r18v = o.hero ? 'hero' : 'evo';
+      return r;
+    };
+  }
+  if (typeof drawDying === 'function') {                // dying troops keep their team colours and variant
     const baseDying = drawDying;
     drawDying = function (d) {
-      const rk = d && rosterKey(d.key);
-      if (!R18.on || !rk || d.side === 'p') return baseDying.apply(this, arguments);
+      const rk = d && rosterKey(d.key), v = (d && d.r18v) || '';
+      if (!R18.on || !rk || (d.side === 'p' && !v)) return baseDying.apply(this, arguments);
       const sk = typeof spriteKey === 'function' ? spriteKey(d.key) : d.key, prev = ART3D[sk];
-      const im = staticSprite(d.key, 'e');
+      const im = staticSprite(d.key, d.side === 'p' ? 'p' : 'e', v);
       if (im) ART3D[sk] = im;
       try { return baseDying.apply(this, arguments); } finally { ART3D[sk] = prev; }
     };
