@@ -148,7 +148,7 @@ function genByKey(key) {
 }
 
 // ---------------------------------------------------------------- GL state
-const GL = {ok: false, failed: false, err: '', cv: null, gl: null, prog: null, meshes: new Map(), loc: null, SIZE: 256};
+const GL = {ok: false, failed: false, lost: false, losses: 0, restores: 0, err: '', cv: null, gl: null, prog: null, meshes: new Map(), loc: null, SIZE: 256};
 const VS = [
   'attribute vec3 aP;', 'attribute vec3 aN;',
   'uniform mat4 uM;', 'uniform mat3 uNM;', 'uniform mat4 uV;', 'uniform mat3 uVR;', 'uniform float uOut;',
@@ -188,7 +188,25 @@ const FS = [
   '}'
 ].join('\n');
 
+// builds the shader program on a (new or restored) context
+function glSetup(gl) {
+  const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(gl.getShaderInfoLog(o)); return o; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(gl.getProgramInfoLog(pr));
+  gl.useProgram(pr);
+  const L = {};
+  for (const a of ['aP', 'aN']) L[a] = gl.getAttribLocation(pr, a);
+  for (const u of ['uM', 'uNM', 'uV', 'uVR', 'uOut', 'uC', 'uMat', 'uRim', 'uFlash', 'uLine']) L[u] = gl.getUniformLocation(pr, u);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+  gl.enable(gl.CULL_FACE); gl.frontFace(gl.CW);
+  gl.clearColor(0, 0, 0, 0);
+  GL.meshes.clear();                                   // buffers from a lost context are dead
+  Object.assign(GL, {prog: pr, loc: L});
+}
 function glInit() {
+  if (GL.lost) return false;                           // context lost: troops fall back to their static sprites until it is restored
   if (GL.ok || GL.failed) return GL.ok;
   try {
     const cv = document.createElement('canvas');
@@ -196,25 +214,19 @@ function glInit() {
     const gl = cv.getContext('webgl', {alpha: true, antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: true, depth: true, stencil: false})
       || cv.getContext('experimental-webgl', {alpha: true, antialias: true, premultipliedAlpha: true, preserveDrawingBuffer: true, depth: true});
     if (!gl) throw new Error('WebGL unavailable');
-    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
-    const pr = gl.createProgram();
-    gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(pr);
-    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
-    gl.useProgram(pr);
-    const L = {};
-    for (const a of ['aP', 'aN']) L[a] = gl.getAttribLocation(pr, a);
-    for (const u of ['uM', 'uNM', 'uV', 'uVR', 'uOut', 'uC', 'uMat', 'uRim', 'uFlash', 'uLine']) L[u] = gl.getUniformLocation(pr, u);
-    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
-    gl.enable(gl.CULL_FACE); gl.frontFace(gl.CW);
-    gl.clearColor(0, 0, 0, 0);
-    Object.assign(GL, {cv, gl, prog: pr, loc: L, ok: true});
+    Object.assign(GL, {cv, gl});
+    glSetup(gl);
+    GL.ok = true;
     if (cv.addEventListener) {
-      cv.addEventListener('webglcontextlost', e => { e.preventDefault(); GL.ok = false; GL.failed = true; GL.err = 'context lost'; });
+      cv.addEventListener('webglcontextlost', e => { e.preventDefault(); GL.lost = true; GL.losses++; GL.err = 'context lost'; });
+      cv.addEventListener('webglcontextrestored', () => {
+        try { glSetup(gl); GL.lost = false; GL.err = ''; GL.restores++; }
+        catch (e) { GL.failed = true; GL.ok = false; GL.lost = false; GL.err = 'restore failed: ' + (e && e.message || e); }
+      });
     }
     return true;
   } catch (e) {
-    GL.failed = true; GL.err = String(e && e.message || e);
+    GL.ok = false; GL.failed = true; GL.err = String(e && e.message || e);
     return false;
   }
 }
@@ -388,7 +400,7 @@ function drawModel(model, bones, team, yaw, span, yBot, flash, N, outlinePx) {
 }
 // render one frame of `model` into a fresh 2D canvas of N×N px
 function renderFrame(model, st, side, yaw, N, opt) {
-  if (!glInit()) return null;
+  if (!glInit() || GL.gl.isContextLost()) return null;   // never cache a blank frame from a dying context
   const gl = GL.gl, L = GL.loc;
   N = Math.max(16, Math.min(GL.SIZE, N | 0));
   opt = opt || {};
@@ -415,12 +427,20 @@ const FRAME = {span: 2.3, yBot: -0.55};
 // ---------------------------------------------------------------- frame cache (LRU)
 const CACHE = new Map();
 const CACHE_MAX = 900;
+// frames are canvases (4 B/px): also bound the total pixel count so high-DPR phones can't grow it past ~80 MB
+const CACHE_PX_MAX = 20e6;
+const CACHE_STAT = {px: 0, evicted: 0};
 function cacheGet(key) {
   const v = CACHE.get(key);
   if (v) { CACHE.delete(key); CACHE.set(key, v); }
   return v;
 }
 function cachePut(key, v) {
-  CACHE.set(key, v);
-  while (CACHE.size > CACHE_MAX) CACHE.delete(CACHE.keys().next().value);
+  const old = CACHE.get(key);
+  if (old) { CACHE_STAT.px -= old.width * old.height; CACHE.delete(key); }
+  CACHE.set(key, v); CACHE_STAT.px += v.width * v.height;
+  while (CACHE.size > CACHE_MAX || (CACHE_STAT.px > CACHE_PX_MAX && CACHE.size > 1)) {
+    const k = CACHE.keys().next().value, f = CACHE.get(k);
+    CACHE_STAT.px -= f.width * f.height; CACHE.delete(k); CACHE_STAT.evicted++;
+  }
 }

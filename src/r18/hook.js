@@ -10,7 +10,7 @@
 
 const R18 = window.R18 = {
   on: true, version: 'r18', supported: false,
-  stats: {draws: 0, hits: 0, renders: 0, deferred: 0, fallbacks: 0, portraits: 0}, frameNo: 0,
+  stats: {draws: 0, hits: 0, renders: 0, deferred: 0, fallbacks: 0, statics: 0, portraits: 0}, frameNo: 0,
   roster: ROSTER, models: new Map(), err: ''
 };
 
@@ -134,7 +134,19 @@ function drawTroop3D(u, h) {
   else C.drawImage(fr, -wpx / 2, -(span + FRAME.yBot) * h, wpx, (span + FRAME.yBot) * h);
   C.restore();
   R18.stats.draws++;
+  // warm this side's static sprite so a later context loss still shows team colours
+  const sid = u.key + '|' + variant;
+  if (!(STATIC[sid] && STATIC[sid][side]) && budgetLeft()) {
+    const t1 = performance.now();
+    staticSprite(u.key, side, variant);
+    BUDGET.spent += performance.now() - t1; BUDGET.misses++;
+  }
   return true;
+}
+function cachedStatic(u) {
+  const variant = u.hero ? 'hero' : u.evo ? 'evo' : '';
+  const s = STATIC[u.key + '|' + variant] || STATIC[u.key + '|'];
+  return s && s[u.side === 'p' ? 'p' : 'e'] || null;
 }
 
 // ---------------------------------------------------------------- static renders (sprites + card art)
@@ -198,7 +210,7 @@ function rename() {
     if (!r) continue;
     const c = CARDS[k];
     if (!c.r18name) { c.r18name = c.name; }
-    c.name = (rk === k || !r.helper) ? r.n : r.n;
+    c.name = r.n;
     if (r.d) c.desc = r.d;
   }
   for (const k in NAMES_EXTRA) if (CARDS[k]) CARDS[k].name = NAMES_EXTRA[k];
@@ -241,6 +253,9 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
   drawSpriteRigged = function (u, img, h, atkF, kickF) {
     if (R18.on && u && h > 0) {
       try { if (drawTroop3D(u, h)) return; } catch (e) { R18.err = String(e && e.message || e); R18.stats.fallbacks++; }
+      // live 3D unavailable (context lost / budget): the team-coloured static render of this troop
+      const s = rosterKey(u.key) && cachedStatic(u);
+      if (s) { R18.stats.statics++; return baseRig.call(this, u, s, h, atkF, kickF); }
     }
     return baseRig.apply(this, arguments);
   };
@@ -275,22 +290,23 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
     render = function () { R18.frameNo++; return baseRender.apply(this, arguments); };
   }
   R18.supported = glInit();
+  rename();                                            // original names / card text, with or without WebGL
   if (R18.supported) {
-    rename();
     installSprites();
-    // portraits: a few per frame so the menu never hitches; re-assert in case a late loader overwrites them
+    // portraits: a few per frame so the menu never hitches
     const step = () => {
       const done = installPortraits(6);
       if (!done && typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(step);
     };
     step();
-    let checks = 0;
-    const keep = setInterval(() => {
-      installSprites(); rename();
-      PORTRAIT_DONE.clear(); installPortraits(9999);
-      if (++checks >= 3) clearInterval(keep);
-    }, 1500);
   }
+  // re-assert in case a late loader overwrites names / sprites / portraits
+  let checks = 0;
+  const keep = setInterval(() => {
+    rename();
+    if (R18.supported && !GL.lost) { installSprites(); PORTRAIT_DONE.clear(); installPortraits(9999); }
+    if (++checks >= 3) clearInterval(keep);
+  }, 1500);
 }
 R18.modelFor = modelFor; R18.renderFrame = renderFrame; R18.portrait = portrait; R18.staticSprite = staticSprite;
-R18.FRAME = FRAME; R18.BUDGET = BUDGET; R18.cache = CACHE; R18.GL = GL;
+R18.FRAME = FRAME; R18.BUDGET = BUDGET; R18.cache = CACHE; R18.cacheStat = CACHE_STAT; R18.GL = GL;
