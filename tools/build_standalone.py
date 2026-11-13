@@ -74,6 +74,18 @@ def main(src_path, out_path):
     npre = html.count(pre_old)
     html = html.replace(pre_old, pre_new)
 
+    # migrateProfile: a save whose `cards` (or a card entry) is a truthy non-object, e.g. {"cards":1}, passes
+    # parseSave() and then threw at boot, leaving profile null and the game unstartable. Reset only the bad
+    # part to defaults; trophies, gold and every other field are kept.
+    mig = [('  if (!p.cards) p.cards = d.cards;',
+            "  if (!p.cards || typeof p.cards !== 'object') p.cards = d.cards;"),
+           ('  for (const k of COLLECTIBLE) if (!p.cards[k]) p.cards[k] =',
+            "  for (const k of COLLECTIBLE) if (!p.cards[k] || typeof p.cards[k] !== 'object') p.cards[k] =")]
+    nmig = 0
+    for old, new in mig:
+        nmig += html.count(old)
+        html = html.replace(old, new)
+
     # visible branding
     html = html.replace('<title>Clash Royale — Arena Clone (r17 · Volumetric 3D Troops)</title>',
                         '<title>Nova Keep — Arena (r18 · Original 3D Troops)</title>')
@@ -83,7 +95,7 @@ def main(src_path, out_path):
 
     open(out_path, 'w', encoding='utf-8').write(html)
     print('troop keys', len(keys), '| images removed', stats['removed'],
-          '(%.1f MB base64)' % (stats['bytes'] / 1e6), '| r17 removed', n17, '| preboot fixed', npre, '| cdn snippet removed', ncf,
+          '(%.1f MB base64)' % (stats['bytes'] / 1e6), '| r17 removed', n17, '| preboot fixed', npre, '| migrate fixed', nmig, '| cdn snippet removed', ncf,
           '| out %.2f MB' % (len(html.encode('utf-8')) / 1e6))
 
 

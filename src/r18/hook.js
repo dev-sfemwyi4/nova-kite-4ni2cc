@@ -290,11 +290,13 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
       return r;
     };
   }
-  if (typeof drawDying === 'function') {                // dying troops keep their team colours and variant
+  if (typeof drawDying === 'function') {                // dying troops keep their own model, team colours and variant
     const baseDying = drawDying;
     drawDying = function (d) {
+      // always swap in this key's own static: several keys share one sprite key (skeleton / skeletons / skarmy),
+      // so ART3D[spriteKey] can hold a sibling's model even for base player troops
       const rk = d && rosterKey(d.key), v = (d && d.r18v) || '';
-      if (!R18.on || !rk || (d.side === 'p' && !v)) return baseDying.apply(this, arguments);
+      if (!R18.on || !rk) return baseDying.apply(this, arguments);
       const sk = typeof spriteKey === 'function' ? spriteKey(d.key) : d.key, prev = ART3D[sk];
       const im = staticSprite(d.key, d.side === 'p' ? 'p' : 'e', v);
       if (im) ART3D[sk] = im;

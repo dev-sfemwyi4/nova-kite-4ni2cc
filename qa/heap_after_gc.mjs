@@ -1,7 +1,7 @@
 // usage: node qa/heap_after_gc.mjs <cdp ws url from `agent-browser get cdp-url`>  — forces a GC on the game tab and prints the live JS heap
 const base=process.argv[2];
 let wsUrl=base;
-if(!base.includes('/devtools/page/')){const http=base.replace('ws://','http://').replace(/\/devtools\/browser\/.*/,'');const l=await (await fetch(http+'/json/list')).json();wsUrl=l.find(t=>t.type==='page'&&/r18/.test(t.url)).webSocketDebuggerUrl;}
+if(!base.includes('/devtools/page/')){const http=base.replace('ws://','http://').replace(/\/devtools\/browser\/.*/,'');const l=await (await fetch(http+'/json/list')).json();wsUrl=l.find(t=>t.type==='page'&&/r18/.test(t.url)&&!/contender/.test(t.url)).webSocketDebuggerUrl;}
 const ws=new WebSocket(wsUrl);let id=0;const pend={};
 ws.onmessage=e=>{const m=JSON.parse(e.data);if(pend[m.id]){pend[m.id](m);delete pend[m.id];}};
 await new Promise(r=>ws.onopen=r);
