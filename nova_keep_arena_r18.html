@@ -26115,7 +26115,7 @@ const NAMES_EXTRA = {};
 
 const R18 = window.R18 = {
   on: true, version: 'r18', supported: false,
-  stats: {draws: 0, hits: 0, renders: 0, fallbacks: 0, portraits: 0},
+  stats: {draws: 0, hits: 0, renders: 0, deferred: 0, fallbacks: 0, portraits: 0}, frameNo: 0,
   roster: ROSTER, models: new Map(), err: ''
 };
 
@@ -26185,6 +26185,19 @@ function yawOf(u) {
   return u.r18yaw;
 }
 const YAW_STEPS = 32;
+// fresh 3D renders are budgeted per animation frame so a big battle (or a slow, software-GL device)
+// degrades to slightly stale poses instead of stalling the game loop
+const BUDGET = {frame: -1, spent: 0, misses: 0, ms: 6};
+function budgetLeft() {
+  const f = R18.frameNo;
+  if (f !== BUDGET.frame) { BUDGET.frame = f; BUDGET.spent = 0; BUDGET.misses = 0; }
+  return BUDGET.misses === 0 || BUDGET.spent < BUDGET.ms;
+}
+const SIZE_BUCKETS = [48, 80, 112, 160, 208, 256];
+function sizeBucket(px) {
+  for (const b of SIZE_BUCKETS) if (px <= b * 1.08) return Math.min(b, GL.SIZE);
+  return GL.SIZE;
+}
 function drawTroop3D(u, h) {
   if (!R18.on || !u || !u.c || u.c.building || u.c.spell) return false;
   const variant = u.hero ? 'hero' : u.evo ? 'evo' : '';
@@ -26193,25 +26206,37 @@ function drawTroop3D(u, h) {
   const T = C.getTransform ? C.getTransform() : {a: 1, b: 0, c: 0, d: 1};
   const det = T.a * T.d - T.b * T.c, sc = Math.sqrt(Math.abs(det)) || 1;
   const span = FRAME.span, wpx = span * h;
-  let N = Math.ceil(wpx * sc / 16) * 16;
-  N = Math.max(32, Math.min(GL.SIZE, N));
+  const N = sizeBucket(wpx * sc);
   let yaw = yawOf(u);
   const yq = ((Math.round(yaw / (Math.PI * 2) * YAW_STEPS) % YAW_STEPS) + YAW_STEPS) % YAW_STEPS;
   yaw = yq / YAW_STEPS * Math.PI * 2;
   const st = animState(u, m);
   const side = u.side === 'p' ? 'p' : 'e';
   const key = u.key + '|' + variant + '|' + side + '|' + yq + '|' + N + '|' + stKey(st);
-  let fr = cacheGet(key);
+  let fr = cacheGet(key), whole = true;
   if (!fr) {
-    fr = renderFrame(m, st, side, yaw, N);
-    if (!fr) return false;
-    cachePut(key, fr);
-    R18.stats.renders++;
+    if (budgetLeft()) {
+      const t0 = performance.now();
+      fr = renderFrame(m, st, side, yaw, N);
+      BUDGET.spent += performance.now() - t0;
+      BUDGET.misses++;
+      if (!fr) return false;
+      cachePut(key, fr);
+      R18.stats.renders++;
+    } else {
+      // over this frame's render budget: keep the unit's previous pose (or its static sprite) on screen
+      R18.stats.deferred++;
+      fr = u.r18last && u.r18lastKey === u.key + '|' + variant + '|' + side ? u.r18last : null;
+      if (!fr) { fr = staticSprite(u.key, side, variant); whole = false; }
+      if (!fr) return false;
+    }
   } else R18.stats.hits++;
+  if (whole) { u.r18last = fr; u.r18lastKey = u.key + '|' + variant + '|' + side; }
   C.save();
   if (det < 0) C.scale(-1, 1);                    // the base renderer mirrors to "face" left — our yaw already does
   C.imageSmoothingEnabled = true;
-  C.drawImage(fr, -wpx / 2, -(span + FRAME.yBot) * h, wpx, wpx);
+  if (whole) C.drawImage(fr, -wpx / 2, -(span + FRAME.yBot) * h, wpx, wpx);
+  else C.drawImage(fr, -wpx / 2, -(span + FRAME.yBot) * h, wpx, (span + FRAME.yBot) * h);
   C.restore();
   R18.stats.draws++;
   return true;
@@ -26350,6 +26375,10 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
       try { return baseDying.apply(this, arguments); } finally { ART3D[sk] = prev; }
     };
   }
+  if (typeof render === 'function') {                    // one render() call = one budget window
+    const baseRender = render;
+    render = function () { R18.frameNo++; return baseRender.apply(this, arguments); };
+  }
   R18.supported = glInit();
   if (R18.supported) {
     rename();
@@ -26369,7 +26398,7 @@ if (typeof drawSpriteRigged === 'function' && typeof drawUnitB === 'function') {
   }
 }
 R18.modelFor = modelFor; R18.renderFrame = renderFrame; R18.portrait = portrait; R18.staticSprite = staticSprite;
-R18.FRAME = FRAME; R18.cache = CACHE; R18.GL = GL;
+R18.FRAME = FRAME; R18.BUDGET = BUDGET; R18.cache = CACHE; R18.GL = GL;
 
 })();
 </script>
