@@ -65,6 +65,15 @@ def main(src_path, out_path):
     idx = html.rindex('</body>') if '</body>' in html else html.rindex('</html>')
     html = html[:idx] + block + html[idx:]
 
+    # preboot save snapshot: prefer the first save that actually parses (a corrupt primary must not hide a good backup)
+    pre_old = ('<script id="polish-preboot">try{window.__CR_RAW_SAVE=localStorage.getItem("crCloneProfileV2")'
+               '||localStorage.getItem("crCloneProfileV2_bak")||null;}catch(e){window.__CR_RAW_SAVE=null;}</script>')
+    pre_new = ('<script id="polish-preboot">try{window.__CR_RAW_SAVE=null;["crCloneProfileV2","crCloneProfileV2_bak"].some(function(k){'
+               'var r=localStorage.getItem(k);try{if(r&&JSON.parse(r)){window.__CR_RAW_SAVE=r;return true;}}catch(e){}return false;});}'
+               'catch(e){window.__CR_RAW_SAVE=null;}</script>')
+    npre = html.count(pre_old)
+    html = html.replace(pre_old, pre_new)
+
     # visible branding
     html = html.replace('<title>Clash Royale — Arena Clone (r17 · Volumetric 3D Troops)</title>',
                         '<title>Nova Keep — Arena (r18 · Original 3D Troops)</title>')
@@ -74,7 +83,7 @@ def main(src_path, out_path):
 
     open(out_path, 'w', encoding='utf-8').write(html)
     print('troop keys', len(keys), '| images removed', stats['removed'],
-          '(%.1f MB base64)' % (stats['bytes'] / 1e6), '| r17 removed', n17, '| cdn snippet removed', ncf,
+          '(%.1f MB base64)' % (stats['bytes'] / 1e6), '| r17 removed', n17, '| preboot fixed', npre, '| cdn snippet removed', ncf,
           '| out %.2f MB' % (len(html.encode('utf-8')) / 1e6))
 
 
