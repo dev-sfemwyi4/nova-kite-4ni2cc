@@ -26354,6 +26354,11 @@ function installSprites() {
   return n;
 }
 const PORTRAIT_DONE = new Set();
+// evo-capable cards: the polish layer's EVOS table (its card_evo_* pictures were stripped by the build) + any EVO3D entry
+function isEvo(k) {
+  const E = window.POLISH && window.POLISH.EVOS;
+  return !!((E && E[k]) || (window.EVO3D && k in window.EVO3D));
+}
 function installPortraits(budget) {
   if (typeof ART === 'undefined') return true;
   const keys = troopKeys();
@@ -26365,7 +26370,7 @@ function installPortraits(budget) {
     const c = CARDS[k];
     const p = portrait(k, '', c.rarity);
     if (p) ART[k] = p;
-    if (EVOS_ && window.EVO3D && (k in (window.EVO3D || {}) || (typeof EVOS !== 'undefined' && EVOS[k]))) { const q = portrait(k, 'evo', c.rarity); if (q) EVOS_[k] = q; }
+    if (EVOS_ && isEvo(k)) { const q = portrait(k, 'evo', c.rarity); if (q) EVOS_[k] = q; }
     if (HEROS_ && (k in (window.HERO3D || {}) || HERO_KEYS.indexOf(k) >= 0)) { const q = portrait(k, 'hero', c.rarity); if (q) HEROS_[k] = q; }
     PORTRAIT_DONE.add(k); left--;
   }
